@@ -62,7 +62,6 @@ urlpatterns = [
 # ============================
 # Custom error handlers are registered only in production-like environments.
 # During development and testing, Django's default debug pages are preferred.
-# pylint: disable=invalid-name
 if ENVIRONMENT == "production" and not DEBUG and not TESTING:
     handler400 = "errors.views.custom_400_view"
     handler403 = "errors.views.custom_403_view"
