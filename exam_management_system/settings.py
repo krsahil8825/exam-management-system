@@ -76,6 +76,7 @@ ALLOWED_HOSTS = [host for host in os.getenv("ALLOWED_HOSTS", "").split(",") if h
 # Application definition
 # ============================
 INSTALLED_APPS = [
+    "exams",  # Main exams app
     "accounts",  # Custom user accounts app
     "errors",  # Custom error handling app for bad requests, permission issues, and not found errors
     "django.contrib.admin",

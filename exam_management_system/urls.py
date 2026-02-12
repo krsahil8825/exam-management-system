@@ -54,6 +54,7 @@ ENVIRONMENT = os.getenv("ENV", "production").lower()
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("accounts.urls")),  # User accounts and profiles
+    path("exams/", include("exams.urls")),  # Exam management and scheduling
 ]
 
 
