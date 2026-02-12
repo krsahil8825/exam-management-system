@@ -14,36 +14,9 @@ It is responsible for:
 - Registering environment-specific error handlers
 """
 
-import os
-import sys
-import dotenv
-
 from django.contrib import admin
 from django.urls import path, include
-
-
-# ============================
-# Load environment variables
-# ============================
-# Loads variables from a .env file into the environment
-dotenv.load_dotenv()
-
-
-# ============================
-# Environment detection
-# ============================
-
-# DEBUG
-# Enabled only when DEBUG=True explicitly in environment variables
-DEBUG = os.getenv("DEBUG") == "True"
-
-# TESTING
-# Detects Django test runs (manage.py test)
-TESTING = "test" in sys.argv
-
-# ENVIRONMENT
-# Defines deployment environment: production / staging / development
-ENVIRONMENT = os.getenv("ENV", "production").lower()
+from django.conf import settings
 
 
 # ============================
@@ -55,9 +28,17 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("accounts.urls")),  # User accounts and profiles
     path("exams/", include("exams.urls")),  # Exam management and scheduling
-    path("communication/", include("communication.urls")),  # Messaging and notifications
+    path(
+        "communication/", include("communication.urls")
+    ),  # Messaging and notifications
     path("workflow/", include("workflow.urls")),  # Workflow and process management
 ]
+
+# Development-only URLs
+if settings.DEBUG and settings.ENVIRONMENT == "development":
+    urlpatterns += [
+        path("__reload__/", include("django_browser_reload.urls")),
+    ]
 
 
 # ============================
@@ -65,7 +46,7 @@ urlpatterns = [
 # ============================
 # Custom error handlers are registered only in production-like environments.
 # During development and testing, Django's default debug pages are preferred.
-if ENVIRONMENT == "production" and not DEBUG and not TESTING:
+if settings.ENVIRONMENT == "production" and not settings.DEBUG and not settings.TESTING:
     handler400 = "errors.views.custom_400_view"
     handler403 = "errors.views.custom_403_view"
     handler404 = "errors.views.custom_404_view"

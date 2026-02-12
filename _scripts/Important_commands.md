@@ -15,6 +15,7 @@
 - `uv run python manage.py migrate` : Applies database migrations using the 'uv' tool.
 - `uv run gunicorn network.wsgi:application --bind 0.0.0.0:$PORT` : Command to run the Django application using Gunicorn server.
 - `uv run python manage.py collectstatic --noinput` : Collects static files for deployment using the 'uv' tool.
+- `python manage.py tailwind start` : Starts the Tailwind CSS development server for real-time CSS compilation.
 
 Build: 
 ```bash

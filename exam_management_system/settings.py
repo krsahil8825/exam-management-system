@@ -81,6 +81,8 @@ INSTALLED_APPS = [
     "exams",  # Main exams app
     "accounts",  # Custom user accounts app
     "errors",  # Custom error handling app for bad requests, permission issues, and not found errors
+    "tailwind",  # Tailwind CSS integration for styling
+    "theme",  # use by tailwind
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -88,6 +90,23 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
+
+# Development-only apps
+if DEBUG and ENVIRONMENT == "development":
+    INSTALLED_APPS += [
+        "django_browser_reload",
+    ]
+
+
+# ============================
+# Tailwind CSS configuration
+# ============================
+TAILWIND_APP_NAME = "theme"
+
+if DEBUG:
+    INTERNAL_IPS = ["127.0.0.1"]
+
+NPM_BIN_PATH = "npm" if os.name != "nt" else r"C:\Program Files\nodejs\npm.cmd"
 
 
 # ============================
@@ -103,6 +122,12 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Development-only apps
+if DEBUG and ENVIRONMENT == "development":
+    MIDDLEWARE += [
+        "django_browser_reload.middleware.BrowserReloadMiddleware",
+    ]
 
 
 # ============================

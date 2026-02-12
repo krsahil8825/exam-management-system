@@ -179,6 +179,20 @@ class Registration(models.Model):
         result, created = Result.objects.get_or_create(registration=self)
         result.calculate_result()
 
+    def clean(self):
+        """
+        Ensure registration is within exam time and not duplicate.
+        If exam is not published, registration should not be allowed.
+        """
+        if self.exam.start_time > timezone.now():
+            raise ValidationError("Exam has not started yet.")
+
+        if self.exam.end_time < timezone.now():
+            raise ValidationError("Exam has already ended.")
+
+        if self.exam.status != Exam.PUBLISHED:
+            raise ValidationError("Exam is not open for registration.")
+
     def __str__(self):
         """Return candidate username and exam code."""
         return f"{self.candidate.user.username} - {self.exam.code}"
