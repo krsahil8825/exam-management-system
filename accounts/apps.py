@@ -2,13 +2,15 @@
 accounts.apps
 ~~~~~~~~~~~~~
 
-App configuration for the 'accounts' app.
+Defines the application configuration for the accounts app.
 """
 
 from django.apps import AppConfig
 
 
 class AccountsConfig(AppConfig):
-    """Configuration for the accounts app."""
+    """
+    App configuration for the accounts application.
+    """
 
     name = "accounts"

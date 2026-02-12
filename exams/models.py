@@ -28,10 +28,7 @@ import random
 # Utility Functions
 # =========================================================
 def question_image_upload_path(instance, filename):
-    """
-    Upload path:
-    question_photos/<exam_code>/<filename>
-    """
+    """Return the upload path for question images."""
     return f"question_photos/{instance.exam.code}/{filename}"
 
 
@@ -39,9 +36,7 @@ def question_image_upload_path(instance, filename):
 # Exam Model
 # =========================================================
 class Exam(models.Model):
-    """
-    Represents an examination created by an employee.
-    """
+    """Model representing an exam created by an employee."""
 
     slug = models.SlugField(unique=True, blank=True)
     code = models.CharField(max_length=20, unique=True, blank=True)
@@ -75,9 +70,7 @@ class Exam(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def generate_code(self):
-        """
-        Generates a unique exam code in format EXAM-XXXXXXXX.
-        """
+        """Generate a unique exam code."""
         chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
         code = "EXAM-" + "".join(random.choices(chars, k=8))
@@ -87,7 +80,7 @@ class Exam(models.Model):
         return code
 
     def save(self, *args, **kwargs):
-        """Override save to auto-generate code and slug."""
+        """Auto-generate code and slug if missing."""
         if not self.code:
             self.code = self.generate_code()
 
@@ -97,7 +90,7 @@ class Exam(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        """String representation of exam showing code and title."""
+        """Return exam code and title."""
         return f"{self.code} - {self.title[:50]}"
 
 
@@ -105,10 +98,7 @@ class Exam(models.Model):
 # Question Model
 # =========================================================
 class Question(models.Model):
-    """
-    Question belongs to ONE exam.
-    Many questions can belong to one exam.
-    """
+    """Model representing a question in an exam."""
 
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="questions")
 
@@ -134,19 +124,15 @@ class Question(models.Model):
     marks = models.PositiveIntegerField(default=1)
 
     def save(self, *args, **kwargs):
-        """Override save to update total marks of exam."""
+        """Update exam total marks after saving."""
         super().save(*args, **kwargs)
 
-        # Update total marks of exam automatically
         total = self.exam.questions.aggregate(total=models.Sum("marks"))["total"] or 0
-
         self.exam.total_marks = total
         self.exam.save(update_fields=["total_marks"])
 
     def __str__(self):
-        """
-        String representation of question showing exam code and first 40 chars of text.
-        """
+        """Return exam code and part of the question text."""
         return f"{self.exam.code} - {self.text[:40]}"
 
 
@@ -154,10 +140,7 @@ class Question(models.Model):
 # Registration Model
 # =========================================================
 class Registration(models.Model):
-    """
-    Candidate registers for an exam.
-    Prevents duplicate registration.
-    """
+    """Model representing a candidate's exam registration."""
 
     exam = models.ForeignKey(
         Exam, on_delete=models.CASCADE, related_name="registrations"
@@ -173,9 +156,7 @@ class Registration(models.Model):
     submitted_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
-        """
-        Enforces unique registration per candidate per exam.
-        """
+        """Ensure one registration per candidate per exam."""
 
         constraints = [
             models.UniqueConstraint(
@@ -184,9 +165,7 @@ class Registration(models.Model):
         ]
 
     def submit_exam(self):
-        """
-        Marks exam as submitted and triggers result calculation.
-        """
+        """Mark exam as submitted and calculate result."""
         if self.is_submitted:
             raise ValidationError("Exam already submitted.")
 
@@ -201,9 +180,7 @@ class Registration(models.Model):
         result.calculate_result()
 
     def __str__(self):
-        """
-        String representation of registration showing candidate username and exam code.
-        """
+        """Return candidate username and exam code."""
         return f"{self.candidate.user.username} - {self.exam.code}"
 
 
@@ -211,10 +188,7 @@ class Registration(models.Model):
 # Answer Model
 # =========================================================
 class Answer(models.Model):
-    """
-    Stores candidate answer per question.
-    One answer per question per registration.
-    """
+    """Model storing a candidate's answer to a question."""
 
     registration = models.ForeignKey(
         Registration, on_delete=models.CASCADE, related_name="answers"
@@ -225,23 +199,17 @@ class Answer(models.Model):
     selected_option = models.CharField(max_length=1, choices=Question.OPTION_CHOICES)
 
     class Meta:
-        """
-        Enforces one answer per question per registration.
-        """
+        """Ensure one answer per question per registration."""
 
         unique_together = ("registration", "question")
 
     def clean(self):
-        """
-        Ensure question belongs to same exam as registration.
-        """
+        """Ensure question belongs to the same exam."""
         if self.question.exam != self.registration.exam:
             raise ValidationError("Question does not belong to this exam.")
 
     def __str__(self):
-        """
-        String representation of answer showing registration and question id.
-        """
+        """Return registration and question reference."""
         return f"{self.registration} - Q{self.question.id}"
 
 
@@ -249,9 +217,7 @@ class Answer(models.Model):
 # Result Model
 # =========================================================
 class Result(models.Model):
-    """
-    Auto-calculated result after submission.
-    """
+    """Model representing the calculated result of an exam."""
 
     registration = models.OneToOneField(
         Registration, on_delete=models.CASCADE, related_name="result"
@@ -264,9 +230,7 @@ class Result(models.Model):
     calculated_at = models.DateTimeField(auto_now_add=True)
 
     def calculate_result(self):
-        """
-        Calculates total score and pass status.
-        """
+        """Calculate score, percentage, and pass status."""
         registration = self.registration
         exam = registration.exam
 
@@ -289,7 +253,5 @@ class Result(models.Model):
         self.save()
 
     def __str__(self):
-        """
-        String representation of result showing candidate username and score.
-        """
+        """Return candidate username and score."""
         return f"{self.registration.candidate.user.username} - {self.score}"

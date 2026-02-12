@@ -2,13 +2,13 @@
 exams.apps
 ~~~~~~~~~~
 
-This module contains the configuration for the exams application.
+Application configuration for the exams application.
 """
 
 from django.apps import AppConfig
 
 
 class ExamsConfig(AppConfig):
-    """Configuration for the exams application."""
+    """Configuration class for the exams app."""
 
     name = "exams"

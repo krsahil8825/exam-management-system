@@ -55,6 +55,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("accounts.urls")),  # User accounts and profiles
     path("exams/", include("exams.urls")),  # Exam management and scheduling
+    path("communication/", include("communication.urls")),  # Messaging and notifications
+    path("workflow/", include("workflow.urls")),  # Workflow and process management
 ]
 
 

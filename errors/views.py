@@ -2,30 +2,14 @@
 errors.views
 ~~~~~~~~~~~~
 
-Custom error view implementations for the Exam Management System.
-
-This module defines user-friendly handlers for common HTTP error responses
-that may occur during normal operation of the application.
-
-Purpose:
-- Replace Django's default error pages in production
-- Render a unified error template for all HTTP errors
-- Return correct HTTP status codes without exposing internal details
-
-These views are intended to be registered as global error handlers
-in the root URL configuration when running in production environments.
+Custom error handlers for the application.
 """
 
 from django.shortcuts import render
 
 
 def custom_400_view(request, exception):
-    """
-    Handle HTTP 400 (Bad Request) errors.
-
-    This view is triggered when the server cannot process a malformed
-    or invalid client request.
-    """
+    """Handle 400 Bad Request errors."""
     return render(
         request,
         "errors/error.html",
@@ -39,12 +23,7 @@ def custom_400_view(request, exception):
 
 
 def custom_403_view(request, exception):
-    """
-    Handle HTTP 403 (Forbidden) errors.
-
-    This view is triggered when a user attempts to access a resource
-    without sufficient permissions.
-    """
+    """Handle 403 Forbidden errors."""
     return render(
         request,
         "errors/error.html",
@@ -58,12 +37,7 @@ def custom_403_view(request, exception):
 
 
 def custom_404_view(request, exception):
-    """
-    Handle HTTP 404 (Not Found) errors.
-
-    This view is triggered when a requested URL does not match any
-    registered route in the application.
-    """
+    """Handle 404 Not Found errors."""
     return render(
         request,
         "errors/error.html",
@@ -77,12 +51,7 @@ def custom_404_view(request, exception):
 
 
 def custom_500_view(request):
-    """
-    Handle HTTP 500 (Internal Server Error) errors.
-
-    This view is triggered when an unhandled exception occurs on the
-    server side during request processing.
-    """
+    """Handle 500 Internal Server Error."""
     return render(
         request,
         "errors/error.html",

@@ -2,16 +2,14 @@
 exams.views
 ~~~~~~~~~~~
 
-This module contains views related to exam management, including creating,
-updating, and viewing exams.
+View functions for the exams application.
 """
 
 from django.http import HttpResponse
 
+
 def home(request):
-    """
-    Home view for the exams app.
-    """
+    """Render the home page for the exams app."""
     return HttpResponse(
-        "Welcome to the Exam Management System! This is your dashboard. Soon, you will see your profile information or upcoming exams"
+        "Welcome to the Exams Module. Soon, you will be able to create and manage exams here."
     )

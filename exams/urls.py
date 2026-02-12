@@ -1,8 +1,8 @@
 """
 exams.urls
 ~~~~~~~~~~
-This module defines URL patterns for the exams app, 
-including routes for viewing the home page and managing exams.
+
+URL patterns for the exams application.
 """
 
 from django.urls import path
