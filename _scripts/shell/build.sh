@@ -1,11 +1,16 @@
 #!/bin/sh
 set -e
 
-# Sync Python dependencies
+echo "Installing dependencies..."
 uv sync
 
-# Apply database migrations
+echo "Building Tailwind CSS..."
+uv run python manage.py tailwind build
+
+echo "Applying migrations..."
 uv run python manage.py migrate
 
-# Collect static files for production
+echo "Collecting static files..."
 uv run python manage.py collectstatic --noinput
+
+echo "Build complete."

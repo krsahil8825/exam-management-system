@@ -1,10 +1,11 @@
-#!/bin/sh
-set -e
+# startserver.ps1
+# Start ASGI server using Uvicorn
 
-# Start the ASGI server using Uvicorn
-# Exposes the application on all network interfaces
-# Intended for production or containerized environments
+$ErrorActionPreference = "Stop"
 
-uv run uvicorn exam_management_system.asgi:application \
-    --host 0.0.0.0 \
-    --port 8000
+Write-Host "Starting ASGI server..."
+
+uv run uvicorn exam_management_system.asgi:application `
+    --host 127.0.0.1 `
+    --port 8000 `
+    --workers 4

@@ -1,13 +1,18 @@
 # build.ps1
-# Build steps for the Django application
+# Production build script (Windows)
 
 $ErrorActionPreference = "Stop"
 
-# Sync Python dependencies
+Write-Host "Installing dependencies..."
 uv sync
 
-# Apply database migrations
+Write-Host "Building Tailwind CSS..."
+uv run python manage.py tailwind build
+
+Write-Host "Applying migrations..."
 uv run python manage.py migrate
 
-# Collect static files for production
+Write-Host "Collecting static files..."
 uv run python manage.py collectstatic --noinput
+
+Write-Host "Build complete."

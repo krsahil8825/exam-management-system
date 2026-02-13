@@ -1,11 +1,7 @@
 #!/bin/sh
 set -e
 
-# Run Django in production-like mode for local testing
-# - DEBUG disabled
-# - Development environment
-# - Static files served via --insecure
-# - Auto-reload disabled
+echo "Starting Django in production-like mode..."
 
 export DEBUG=False
 export ENV=development

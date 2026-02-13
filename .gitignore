@@ -121,4 +121,9 @@ coverage/
 # Docker
 mysql/
 
+# tailwind and static files
+theme/static_src/node_modules/
+theme/static/css/dist/
+staticfiles/
+
 # End of file
