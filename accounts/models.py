@@ -69,6 +69,12 @@ class User(AbstractUser):
 
     email_verified = models.BooleanField(default=False)
 
+    def save(self, *args, **kwargs):
+        if self.is_superuser:
+            self.email_verified = True
+
+        super().save(*args, **kwargs)
+
     def __str__(self):
         """Return the username."""
         return self.username
@@ -228,22 +234,34 @@ class Employee(models.Model):
         return f"{role_prefix}-{random_number}"
 
     def save(self, *args, **kwargs):
-        """Handle role validation and employee ID generation."""
+        """Ensure a user does not have both Employee and Candidate profiles, and handle role-based logic."""
+
         if hasattr(self.user, "candidate_profile"):
             raise ValidationError("This user already has a Candidate profile.")
 
-        if self.pk:
-            old_instance = Employee.objects.get(pk=self.pk)
+        # Automatically set gender to Male to avoid validation issues for superusers,
+        # and they can update it later if needed since superusers have full permissions.
+        # This is a temporary workaround to ensure superusers can be created without
+        # hitting validation errors
+        if self.user.is_superuser:
+            self.gender = self.MALE
 
-            if old_instance.role != self.role:
-                self.employee_id = self._generate_employee_id()
-            else:
-                self.employee_id = old_instance.employee_id
-        else:
-            if not self.employee_id:
-                self.employee_id = self._generate_employee_id()
+        if self.user.is_staff and self.user.is_superuser:
+            self.role = self.SUPER_ADMIN
+            self.is_verified = True
+
+        if not self.employee_id:
+            self.employee_id = self._generate_employee_id()
 
         super().save(*args, **kwargs)
+
+        if (
+            self.role in [self.SUPER_ADMIN, self.ADMIN, self.MANAGER]
+            and self.is_verified
+        ):
+            if not self.user.is_staff:
+                self.user.is_staff = True
+                self.user.save()
 
     def __str__(self):
         """Return a readable employee representation."""
