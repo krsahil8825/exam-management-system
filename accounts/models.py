@@ -2,42 +2,43 @@
 accounts.models
 ~~~~~~~~~~~~~~~
 
-Defines the core data models for the accounts application.
-
-This module includes:
-- User: Custom authentication model extending AbstractUser.
-- Candidate: Profile model for exam applicants.
-- Employee: Profile model for staff members managing exams.
-- Address: Normalized model for storing user address information.
-
-The architecture separates authentication (User) from
-domain-specific roles (Candidate and Employee) to ensure
-clean design and enforce role-based constraints.
+Defines the custom User model with email-based authentication, along with related Address, Candidate, and Employee profile models. Includes validation logic for user data and profile photos.
 """
+
+import os
+import uuid
 
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
-import uuid
 
-from .utils.validate import phone_validator, country_code_validator, validate_profile_photo
 from .managers import UserManager
+from .utils.validate import (
+    country_code_validator,
+    phone_validator,
+    validate_profile_photo,
+)
 
 
-# =========================================================
-# Utility Function
-# =========================================================
+class GenderChoices(models.TextChoices):
+    """Standardized gender options for user profiles."""
+
+    MALE = "M", "Male"
+    FEMALE = "F", "Female"
+    OTHER = "O", "Other"
+
+
 def user_profile_picture_path(instance, filename):
-    """Return the upload path for a user's profile picture."""
-    folder_name = str(instance).replace("@", "_at_").replace(".", "_dot_")
-    return f"profile_pictures/{folder_name}/{filename}"
+    """Return a stable and safe upload path for profile photos."""
+    base_name = os.path.basename(filename)
+    email_prefix = (instance.email or "user").split("@")[0].lower()
+    unique_prefix = uuid.uuid4().hex[:12]
+    return f"profile_pictures/{email_prefix}/{unique_prefix}_{base_name}"
 
 
-# =========================================================
-# Custom User Model
-# =========================================================
 class User(AbstractUser):
-    """Custom user model for authentication and profile linkage."""
+    """Custom authentication model using email as the username field."""
 
     objects = UserManager()
 
@@ -53,57 +54,79 @@ class User(AbstractUser):
         validators=[validate_profile_photo],
     )
 
-    # OTP fields for email and phone verification
     email_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
     email_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
     phone_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
     phone_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
+    password_otp = models.CharField(max_length=6, blank=True, null=True, editable=False)
+    password_otp_created_at = models.DateTimeField(
+        blank=True, null=True, editable=False
+    )
 
     email_verified = models.BooleanField(default=False)
     phone_verified = models.BooleanField(default=False)
 
-    # OTP field for password reset
-    password_otp = models.CharField(max_length=6, blank=True, null=True, editable=False)
-    password_otp_created_at = models.DateTimeField(blank=True, null=True, editable=False)
-
-    # Important settings
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = [
-        "country_code",
-        "phone",
-    ]
+    REQUIRED_FIELDS = ["country_code", "phone", "first_name", "last_name"]
 
     def clean(self):
-        """Enforce validation rules for phone and country code."""
+        """Normalize email and phone fields, and enforce required fields when phone is provided."""
         super().clean()
+        if self.email:
+            self.email = self.email.strip().lower()
+
+        self.country_code = (self.country_code or "").strip()
+        self.phone = (self.phone or "").strip()
+
         if self.phone and not self.country_code:
             raise ValidationError("Country code is required when phone is provided.")
 
     def save(self, *args, **kwargs):
-        """Override save to enforce validation and handle superuser defaults."""
+        """Override save to handle email normalization, verification status resets, and superuser defaults."""
+        is_raw_save = kwargs.get("raw", False)
 
-        self.email = self.email.lower()
+        if not is_raw_save and self.pk and not self.is_superuser:
+            previous = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values("email", "phone", "country_code")
+                .first()
+            )
+            if previous:
+                current_email = (self.email or "").strip().lower()
+                previous_email = (previous["email"] or "").strip().lower()
+                if current_email != previous_email:
+                    self.email_verified = False
+
+                phone_changed = (self.phone or "") != (previous["phone"] or "")
+                country_code_changed = (self.country_code or "") != (
+                    previous["country_code"] or ""
+                )
+                if phone_changed or country_code_changed:
+                    self.phone_verified = False
+
+                if not self.email or not self.phone or not self.country_code:
+                    raise ValidationError(
+                        "Email, phone, and country code are required fields."
+                    )
 
         if self.is_superuser:
+            self.is_staff = True
             self.email_verified = True
             self.phone_verified = True
-            self.is_staff = True
 
-        if not kwargs.get("raw", False):
+        if not is_raw_save:
             self.full_clean()
 
-        super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
     def __str__(self):
-        """Return the email."""
+        """Return the email as the string representation of the user."""
         return self.email
 
 
-# =========================================================
-# Address Model
-# =========================================================
 class Address(models.Model):
-    """Model representing a user's address."""
+    """Stores one normalized address per user."""
 
     user = models.OneToOneField(
         User,
@@ -111,7 +134,6 @@ class Address(models.Model):
         primary_key=True,
         related_name="address",
     )
-
     street1 = models.CharField(max_length=255)
     street2 = models.CharField(max_length=255, blank=True, null=True)
     city = models.CharField(max_length=100)
@@ -120,182 +142,136 @@ class Address(models.Model):
     zip_code = models.CharField(max_length=20)
 
     def __str__(self):
-        """Return a readable address representation."""
+        """Return a string representation of the address."""
         return f"{self.user.email} - {self.city}"
 
 
-# =========================================================
-# Candidate Profile
-# =========================================================
 class Candidate(models.Model):
     """Profile model for exam candidates."""
+
+    class EducationLevel(models.TextChoices):
+        """Standardized education level options for candidate profiles."""
+
+        BACHELORS = "B", "Bachelor's Degree"
+        MASTERS = "M", "Master's Degree"
+        PHD = "P", "PhD"
 
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         related_name="candidate_profile",
     )
-
     candidate_id = models.CharField(max_length=50, unique=True, editable=False)
-
-    BACHELORS = "B"
-    MASTERS = "M"
-    PHD = "P"
-
-    EDUCATION_LEVEL_CHOICES = [
-        (BACHELORS, "Bachelor's Degree"),
-        (MASTERS, "Master's Degree"),
-        (PHD, "PhD"),
-    ]
-
     education_level = models.CharField(
         max_length=1,
-        choices=EDUCATION_LEVEL_CHOICES,
-        default=BACHELORS,
+        choices=EducationLevel.choices,
+        default=EducationLevel.BACHELORS,
     )
-
     university_name = models.CharField(max_length=255)
     enrollment_number = models.CharField(max_length=100, unique=True)
     course_name = models.CharField(max_length=255)
-    semester = models.PositiveIntegerField()
-
+    semester = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(12)]
+    )
     father_name = models.CharField(max_length=255)
     mother_name = models.CharField(max_length=255)
     dob = models.DateField()
-    MALE = "M"
-    FEMALE = "F"
-    OTHER = "O"
+    gender = models.CharField(max_length=1, choices=GenderChoices.choices)
 
-    gender_choices = [
-        (MALE, "Male"),
-        (FEMALE, "Female"),
-        (OTHER, "Other"),
-    ]
+    @classmethod
+    def _next_candidate_id(cls):
+        """Generate a unique candidate ID in the format CAND-XXXXXXXXXXXX where X is a hexadecimal character."""
+        while True:
+            candidate_id = f"CAND-{uuid.uuid4().hex[:12].upper()}"
+            if not cls.objects.filter(candidate_id=candidate_id).exists():
+                return candidate_id
 
-    gender = models.CharField(max_length=1, choices=gender_choices)
-
-    def _generate_candidate_id(self):
-        """Generate a unique candidate ID."""
-        ID_PREFIX = "CAND"
-
-        ID_SUFFIX = str(uuid.uuid4().hex[:12]).upper()
-
-        return f"{ID_PREFIX}-{ID_SUFFIX}"
-
-    def save(self, *args, **kwargs):
-        """Ensure a user does not have both Candidate and Employee profiles."""
-        if hasattr(self.user, "employee_profile"):
+    def clean(self):
+        """Ensure that a user cannot have both Candidate and Employee profiles, and that the candidate_id is unique if set."""
+        super().clean()
+        if self.user_id and Employee.objects.filter(user_id=self.user_id).exists():
             raise ValidationError("This user already has an Employee profile.")
 
+    def save(self, *args, **kwargs):
+        """Override save to generate a unique candidate_id if not set."""
         if not self.candidate_id:
-            self.candidate_id = self._generate_candidate_id()
+            self.candidate_id = self._next_candidate_id()
 
-        super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
     def __str__(self):
-        """Return a readable candidate representation."""
+        """Return a string representation of the candidate."""
         return f"Candidate: {self.user.email}"
 
 
-# =========================================================
-# Employee Profile
-# =========================================================
 class Employee(models.Model):
     """Profile model for employees managing exams."""
+
+    class RoleChoices(models.TextChoices):
+        """Standardized role options for employee profiles."""
+
+        NOT_ASSIGNED = "NA", "Not Assigned"
+        SUPER_ADMIN = "SA", "Super Admin"
+        ADMIN = "AD", "Admin"
+        MANAGER = "MG", "Manager"
+        EXAMINER = "EX", "Examiner"
+        INVIGILATOR = "IN", "Invigilator"
+        ASSISTANT = "AS", "Assistant"
+
+    class DepartmentChoices(models.TextChoices):
+        """Standardized department options for employee profiles."""
+
+        NOT_ALLOCATED = "NA", "Not Allocated"
+        HR = "HR", "Human Resources"
+        DEVELOPMENT = "DEV", "Development"
+        SALES = "SALES", "Sales"
+        MARKETING = "MKT", "Marketing"
+        MANAGEMENT = "MGMT", "Management"
 
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         related_name="employee_profile",
     )
-
     employee_id = models.CharField(max_length=50, unique=True, editable=False)
-
-    MALE = "M"
-    FEMALE = "F"
-    OTHER = "O"
-
-    gender_choices = [
-        (MALE, "Male"),
-        (FEMALE, "Female"),
-        (OTHER, "Other"),
-    ]
-
-    gender = models.CharField(max_length=1, choices=gender_choices)
-
-    NOT_ASSIGNED = "NA"
-    SUPER_ADMIN = "SA"
-    ADMIN = "AD"
-    MANAGER = "MG"
-    EXAMINER = "EX"
-    INVIGILATOR = "IN"
-    ASSISTANT = "AS"
-
-    ROLE_CHOICES = [
-        (NOT_ASSIGNED, "Not Assigned"),
-        (SUPER_ADMIN, "Super Admin"),
-        (ADMIN, "Admin"),
-        (MANAGER, "Manager"),
-        (EXAMINER, "Examiner"),
-        (INVIGILATOR, "Invigilator"),
-        (ASSISTANT, "Assistant"),
-    ]
-
+    gender = models.CharField(max_length=1, choices=GenderChoices.choices)
     role = models.CharField(
         max_length=2,
-        choices=ROLE_CHOICES,
-        default=NOT_ASSIGNED,
+        choices=RoleChoices.choices,
+        default=RoleChoices.NOT_ASSIGNED,
     )
-
-    NOT_ALLOCATED = "NA"
-    HR = "HR"
-    DEVELOPMENT = "DEV"
-    SALES = "SALES"
-    MARKETING = "MKT"
-    MANAGEMENT = "MGMT"
-
-    DEPARTMENT_CHOICES = [
-        (NOT_ALLOCATED, "Not Allocated"),
-        (HR, "Human Resources"),
-        (DEVELOPMENT, "Development"),
-        (SALES, "Sales"),
-        (MARKETING, "Marketing"),
-        (MANAGEMENT, "Management"),
-    ]
-
     department = models.CharField(
         max_length=5,
-        choices=DEPARTMENT_CHOICES,
-        default=NOT_ALLOCATED,
+        choices=DepartmentChoices.choices,
+        default=DepartmentChoices.NOT_ALLOCATED,
     )
-
     additional_info = models.TextField(blank=True, null=True)
 
-    def _generate_employee_id(self):
-        """Generate a unique employee ID."""
-        ID_PREFIX = "EMP"
-        ID_SUFFIX = str(uuid.uuid4().hex[:12]).upper()
-        return f"{ID_PREFIX}-{ID_SUFFIX}"
+    @classmethod
+    def _next_employee_id(cls):
+        """Generate a unique employee ID in the format EMP-XXXXXXXXXXXX where X is a hexadecimal character."""
+        while True:
+            employee_id = f"EMP-{uuid.uuid4().hex[:12].upper()}"
+            if not cls.objects.filter(employee_id=employee_id).exists():
+                return employee_id
 
-    def save(self, *args, **kwargs):
-        """Ensure a user does not have both Employee and Candidate profiles, and handle role-based logic."""
-
-        if hasattr(self.user, "candidate_profile"):
+    def clean(self):
+        """Ensure that a user cannot have both Employee and Candidate profiles, and that the employee_id is unique if set."""
+        super().clean()
+        if self.user_id and Candidate.objects.filter(user_id=self.user_id).exists():
             raise ValidationError("This user already has a Candidate profile.")
 
-        # Set gender to Male by default to avoid validation errors when creating superusers.
-        # Superusers can change it later since they have full permissions.
-        if self.user.is_superuser:
-            self.gender = self.MALE
-
-        if self.user.is_staff and self.user.is_superuser:
-            self.role = self.SUPER_ADMIN
+    def save(self, *args, **kwargs):
+        """Override save to generate a unique employee_id if not set, and set defaults for superusers."""
+        if self.user and self.user.is_superuser:
+            self.gender = GenderChoices.MALE
+            self.role = self.RoleChoices.SUPER_ADMIN
 
         if not self.employee_id:
-            self.employee_id = self._generate_employee_id()
+            self.employee_id = self._next_employee_id()
 
-        super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
     def __str__(self):
-        """Return a readable employee representation."""
+        """Return a string representation of the employee."""
         return f"Employee: {self.user.email} ({self.get_role_display()})"
