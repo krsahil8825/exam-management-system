@@ -31,10 +31,18 @@ class GenderChoices(models.TextChoices):
 
 def user_profile_picture_path(instance, filename):
     """Return a stable and safe upload path for profile photos."""
-    base_name = os.path.basename(filename)
+
+    _, extension = os.path.splitext(filename)
+    extension = extension.lstrip(".").lower()
+    name = f"{instance.first_name or 'user'}_{instance.last_name or ''}".strip().lower()
     email_prefix = (instance.email or "user").split("@")[0].lower()
-    unique_prefix = uuid.uuid4().hex[:12]
-    return f"profile_pictures/{email_prefix}/{unique_prefix}_{base_name}"
+    unique_prefix = uuid.uuid4().hex[:20]
+
+    while True:
+        path = f"profile_pictures/{email_prefix}/{unique_prefix}_{name}.{extension}"
+        if not instance.profile_picture.storage.exists(path):
+            return path
+        unique_prefix = uuid.uuid4().hex[:20]
 
 
 class User(AbstractUser):
@@ -118,7 +126,26 @@ class User(AbstractUser):
         if not is_raw_save:
             self.full_clean()
 
+        if self.pk:
+            try:
+                old = User.objects.get(pk=self.pk)
+            except User.DoesNotExist:
+                old = None
+
+            if old and old.profile_picture and old.profile_picture != self.profile_picture:
+                if old.profile_picture.storage.exists(old.profile_picture.name):
+                    old.profile_picture.storage.delete(old.profile_picture.name)
+
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """Override delete to also remove the associated profile picture file."""
+        if self.profile_picture:
+            storage = self.profile_picture.storage
+            if storage.exists(self.profile_picture.name):
+                storage.delete(self.profile_picture.name)
+
+        super().delete(*args, **kwargs)
 
     def __str__(self):
         """Return the email as the string representation of the user."""
