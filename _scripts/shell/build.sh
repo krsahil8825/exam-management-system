@@ -7,8 +7,7 @@ uv sync
 echo "Building Tailwind CSS..."
 uv run python manage.py tailwind build
 
-echo "Applying migrations..."
-uv run python manage.py migrate
+./_scripts/shell/migrate.sh
 
 echo "Collecting static files..."
 uv run python manage.py collectstatic --noinput

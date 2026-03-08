@@ -79,8 +79,7 @@ INSTALLED_APPS = [
     "workflow",  # Workflow and process management
     "communication",  # Internal messaging and notifications
     "exams",  # Main exams app
-    # "accounts",  # Custom user accounts app
-    "accounts.apps.AccountsConfig",  # Register the accounts app with its custom configuration
+    "accounts",  # Custom user accounts app
     "errors",  # Custom error handling app for bad requests, permission issues, and not found errors
     "tailwind",  # Tailwind CSS integration for styling
     "theme",  # use by tailwind

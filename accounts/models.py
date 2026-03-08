@@ -18,7 +18,9 @@ clean design and enforce role-based constraints.
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import models
-import random
+import uuid
+
+from .managers import UserManager
 
 
 # =========================================================
@@ -26,7 +28,56 @@ import random
 # =========================================================
 def user_profile_picture_path(instance, filename):
     """Return the upload path for a user's profile picture."""
-    return f"profile_pictures/{instance.username}/{filename}"
+    folder_name = str(instance).replace("@", "_at_").replace(".", "_dot_")
+    return f"profile_pictures/{folder_name}/{filename}"
+
+
+# =========================================================
+# Custom User Model
+# =========================================================
+class User(AbstractUser):
+    """Custom user model for authentication and profile linkage."""
+
+    objects = UserManager()
+
+    username = None
+
+    country_code = models.CharField(max_length=5, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    email = models.EmailField(unique=True)
+    profile_picture = models.ImageField(
+        upload_to=user_profile_picture_path,
+        blank=True,
+        null=True,
+    )
+
+    # OTP fields for email and phone verification
+    email_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
+    email_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
+    phone_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
+    phone_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
+
+    email_verified = models.BooleanField(default=False)
+    phone_verified = models.BooleanField(default=False)
+
+    # Important settings
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = [
+        "country_code",
+        "phone",
+    ]
+
+    def save(self, *args, **kwargs):
+        if self.is_superuser:
+            self.email_verified = True
+            self.phone_verified = True
+            self.is_staff = True
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        """Return the email."""
+        return self.email
 
 
 # =========================================================
@@ -34,6 +85,13 @@ def user_profile_picture_path(instance, filename):
 # =========================================================
 class Address(models.Model):
     """Model representing a user's address."""
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="address",
+    )
 
     street1 = models.CharField(max_length=255)
     street2 = models.CharField(max_length=255, blank=True, null=True)
@@ -43,41 +101,7 @@ class Address(models.Model):
     zip_code = models.CharField(max_length=20)
 
     def __str__(self):
-        """Return a readable address string."""
-        return f"{self.street1}, {self.city}, {self.state}"
-
-
-# =========================================================
-# Custom User Model
-# =========================================================
-class User(AbstractUser):
-    """Custom user model for authentication and profile linkage."""
-
-    phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
-    email = models.EmailField(unique=True)
-    address = models.OneToOneField(
-        Address,
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-    )
-    profile_picture = models.ImageField(
-        upload_to=user_profile_picture_path,
-        blank=True,
-        null=True,
-    )
-
-    email_verified = models.BooleanField(default=False)
-
-    def save(self, *args, **kwargs):
-        if self.is_superuser:
-            self.email_verified = True
-
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        """Return the username."""
-        return self.username
+        return f"{self.user.email} - {self.city}"
 
 
 # =========================================================
@@ -92,9 +116,7 @@ class Candidate(models.Model):
         related_name="candidate_profile",
     )
 
-    application_number = models.CharField(max_length=20, unique=True)
-    roll_number = models.CharField(max_length=20, unique=True)
-    exam_key = models.CharField(max_length=50, unique=True)
+    candidate_id = models.CharField(max_length=50, unique=True, editable=False)
 
     BACHELORS = "B"
     MASTERS = "M"
@@ -132,18 +154,27 @@ class Candidate(models.Model):
 
     gender = models.CharField(max_length=1, choices=gender_choices)
 
-    is_verified = models.BooleanField(default=False)
+    def _generate_candidate_id(self):
+        """Generate a unique candidate ID."""
+        ID_PREFIX = "CAND"
+
+        ID_SUFFIX = str(uuid.uuid4().hex[:12]).upper()
+
+        return f"{ID_PREFIX}-{ID_SUFFIX}"
 
     def save(self, *args, **kwargs):
         """Ensure a user does not have both Candidate and Employee profiles."""
         if hasattr(self.user, "employee_profile"):
             raise ValidationError("This user already has an Employee profile.")
 
+        if not self.candidate_id:
+            self.candidate_id = self._generate_candidate_id()
+
         super().save(*args, **kwargs)
 
     def __str__(self):
         """Return a readable candidate representation."""
-        return f"Candidate: {self.user.username}"
+        return f"Candidate: {self.user.email}"
 
 
 # =========================================================
@@ -158,7 +189,7 @@ class Employee(models.Model):
         related_name="employee_profile",
     )
 
-    employee_id = models.CharField(max_length=50, unique=True)
+    employee_id = models.CharField(max_length=50, unique=True, editable=False)
 
     MALE = "M"
     FEMALE = "F"
@@ -213,25 +244,18 @@ class Employee(models.Model):
     ]
 
     department = models.CharField(
-        max_length=255,
+        max_length=5,
         choices=DEPARTMENT_CHOICES,
         default=NOT_ALLOCATED,
     )
 
-    is_verified = models.BooleanField(default=False)
     additional_info = models.TextField(blank=True, null=True)
 
     def _generate_employee_id(self):
         """Generate a unique employee ID."""
-        role_prefix = self.role if self.role != self.NOT_ASSIGNED else "EMP"
-        random_number = random.randint(100000, 999999)
-
-        while Employee.objects.filter(
-            employee_id=f"{role_prefix}-{random_number}"
-        ).exists():
-            random_number = random.randint(100000, 999999)
-
-        return f"{role_prefix}-{random_number}"
+        ID_PREFIX = "EMP"
+        ID_SUFFIX = str(uuid.uuid4().hex[:12]).upper()
+        return f"{ID_PREFIX}-{ID_SUFFIX}"
 
     def save(self, *args, **kwargs):
         """Ensure a user does not have both Employee and Candidate profiles, and handle role-based logic."""
@@ -239,30 +263,19 @@ class Employee(models.Model):
         if hasattr(self.user, "candidate_profile"):
             raise ValidationError("This user already has a Candidate profile.")
 
-        # Automatically set gender to Male to avoid validation issues for superusers,
-        # and they can update it later if needed since superusers have full permissions.
-        # This is a temporary workaround to ensure superusers can be created without
-        # hitting validation errors
+        # Set gender to Male by default to avoid validation errors when creating superusers.
+        # Superusers can change it later since they have full permissions.
         if self.user.is_superuser:
             self.gender = self.MALE
 
         if self.user.is_staff and self.user.is_superuser:
             self.role = self.SUPER_ADMIN
-            self.is_verified = True
 
         if not self.employee_id:
             self.employee_id = self._generate_employee_id()
 
         super().save(*args, **kwargs)
 
-        if (
-            self.role in [self.SUPER_ADMIN, self.ADMIN, self.MANAGER]
-            and self.is_verified
-        ):
-            if not self.user.is_staff:
-                self.user.is_staff = True
-                self.user.save()
-
     def __str__(self):
         """Return a readable employee representation."""
-        return f"Employee: {self.user.username} ({self.get_role_display()})"
+        return f"Employee: {self.user.email} ({self.get_role_display()})"
