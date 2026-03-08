@@ -20,6 +20,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 import uuid
 
+from .utils.validate import phone_validator, country_code_validator, validate_profile_photo
 from .managers import UserManager
 
 
@@ -42,13 +43,14 @@ class User(AbstractUser):
 
     username = None
 
-    country_code = models.CharField(max_length=5, blank=True, null=True)
-    phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    country_code = models.CharField(max_length=5, validators=[country_code_validator])
+    phone = models.CharField(max_length=20, unique=True, validators=[phone_validator])
     email = models.EmailField(unique=True)
     profile_picture = models.ImageField(
         upload_to=user_profile_picture_path,
         blank=True,
         null=True,
+        validators=[validate_profile_photo],
     )
 
     # OTP fields for email and phone verification
@@ -60,6 +62,10 @@ class User(AbstractUser):
     email_verified = models.BooleanField(default=False)
     phone_verified = models.BooleanField(default=False)
 
+    # OTP field for password reset
+    password_otp = models.CharField(max_length=6, blank=True, null=True, editable=False)
+    password_otp_created_at = models.DateTimeField(blank=True, null=True, editable=False)
+
     # Important settings
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = [
@@ -67,11 +73,24 @@ class User(AbstractUser):
         "phone",
     ]
 
+    def clean(self):
+        """Enforce validation rules for phone and country code."""
+        super().clean()
+        if self.phone and not self.country_code:
+            raise ValidationError("Country code is required when phone is provided.")
+
     def save(self, *args, **kwargs):
+        """Override save to enforce validation and handle superuser defaults."""
+
+        self.email = self.email.lower()
+
         if self.is_superuser:
             self.email_verified = True
             self.phone_verified = True
             self.is_staff = True
+
+        if not kwargs.get("raw", False):
+            self.full_clean()
 
         super().save(*args, **kwargs)
 
@@ -101,6 +120,7 @@ class Address(models.Model):
     zip_code = models.CharField(max_length=20)
 
     def __str__(self):
+        """Return a readable address representation."""
         return f"{self.user.email} - {self.city}"
 
 

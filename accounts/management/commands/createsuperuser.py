@@ -12,10 +12,12 @@ from accounts.models import Address
 
 
 class Command(BaseCommand):
-    help = "Create superuser with address"
+    """Custom command to create a superuser and prompt for address details."""
 
     def handle(self, *args, **options):
-        print("Creating superuser account...")
+        """Handle the command execution."""
+
+        self.stdout.write("Creating superuser account...")
 
         # Run default Django superuser creation
         super().handle(*args, **options)
