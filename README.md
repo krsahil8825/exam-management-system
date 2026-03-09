@@ -113,10 +113,14 @@ In production mode (`ENV=production` and `DEBUG=False`), the project enables str
 
 The repository includes helper scripts in `_scripts/`:
 
-- Build (Windows): `_scripts/powershell/build.ps1`
-- Build (Unix): `_scripts/shell/build.sh`
-- Start ASGI server (Windows): `_scripts/powershell/startserver.ps1`
-- Start ASGI server (Unix): `_scripts/shell/startserver.sh`
+- Build release artifacts: `_scripts/shell/build_release.sh`
+- Rebuild release artifacts from clean static state: `_scripts/shell/rebuild_release.sh`
+- Clean build artifacts: `_scripts/shell/clean_release.sh`
+- Create and apply migrations: `_scripts/shell/apply_migrations.sh`
+- Run development server: `_scripts/shell/run_dev.sh`
+- Run Django with production profile (smoke test): `_scripts/shell/run_django_prod_demo.sh`
+- Run ASGI production server: `_scripts/shell/run_asgi_prod.sh`
+- Reset local SQLite and app migrations (destructive): `_scripts/shell/reset_dev_data.sh --yes`
 
 ## Notes
 
