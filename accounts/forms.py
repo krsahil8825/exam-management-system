@@ -2,23 +2,27 @@
 accounts.forms
 ~~~~~~~~~~~~~
 
-Forms for user registration, login, profile editing, and OTP verification.
+Forms for user registration, profile editing, and OTP verification in the accounts app.
 """
 
-from datetime import timedelta
-
 from django import forms
-from django.contrib.auth import password_validation
 from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth import password_validation
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Address, Candidate, Employee, GenderChoices, User
+from .models import Address, Candidate, Employee, User, OTP
 from .utils.validate import (
     country_code_validator,
     phone_validator,
     validate_profile_photo,
 )
+from .utils.otp import check_otp, send_email_otp
+from .utils.totp import validate_totp, turn_on_totp, disable_totp
+
+# ========================================
+# Registration and Profile Edit Forms
+# ========================================
 
 
 class BaseAddressForm(forms.Form):
@@ -115,6 +119,11 @@ class BaseUserForm(UserCreationForm):
             attrs={"class": "form-control", "placeholder": "9876543210"}
         ),
     )
+    gender = forms.ChoiceField(
+        label="Gender",
+        choices=User.GenderChoices.choices,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
     profile_picture = forms.ImageField(
         label=(
             "Profile Photo (Format: JPG, JPEG, PNG | Size: 40-200 KB | "
@@ -149,6 +158,7 @@ class BaseUserForm(UserCreationForm):
             "email",
             "country_code",
             "phone",
+            "gender",
             "profile_picture",
             "password1",
             "password2",
@@ -175,6 +185,7 @@ class BaseUserForm(UserCreationForm):
         user.email = self.cleaned_data["email"]
         user.country_code = self.cleaned_data["country_code"]
         user.phone = self.cleaned_data["phone"]
+        user.gender = self.cleaned_data["gender"]
         user.profile_picture = self.cleaned_data["profile_picture"]
         return user
 
@@ -253,11 +264,6 @@ class CandidateRegistrationForm(BaseUserForm, BaseAddressForm):
         label="Date of Birth",
         widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
     )
-    gender = forms.ChoiceField(
-        label="Gender",
-        choices=GenderChoices.choices,
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
 
     def clean_dob(self):
         """Validate that date of birth is in the past."""
@@ -285,7 +291,6 @@ class CandidateRegistrationForm(BaseUserForm, BaseAddressForm):
             father_name=self.cleaned_data["father_name"].strip(),
             mother_name=self.cleaned_data["mother_name"].strip(),
             dob=self.cleaned_data["dob"],
-            gender=self.cleaned_data["gender"],
         )
         return user
 
@@ -293,11 +298,6 @@ class CandidateRegistrationForm(BaseUserForm, BaseAddressForm):
 class EmployeeRegistrationForm(BaseUserForm, BaseAddressForm):
     """Registration form for employees."""
 
-    gender = forms.ChoiceField(
-        label="Gender",
-        choices=GenderChoices.choices,
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
     role = forms.ChoiceField(
         label="Role",
         choices=Employee.RoleChoices.choices,
@@ -331,7 +331,6 @@ class EmployeeRegistrationForm(BaseUserForm, BaseAddressForm):
         Address.objects.create(user=user, **self._address_data())
         Employee.objects.create(
             user=user,
-            gender=self.cleaned_data["gender"],
             role=self.cleaned_data["role"],
             department=self.cleaned_data["department"],
             additional_info=self.cleaned_data["additional_info"].strip(),
@@ -376,6 +375,11 @@ class BaseUserEditForm(forms.Form):
         widget=forms.TextInput(
             attrs={"class": "form-control", "placeholder": "9876543210"}
         ),
+    )
+    gender = forms.ChoiceField(
+        label="Gender",
+        choices=User.GenderChoices.choices,
+        widget=forms.Select(attrs={"class": "form-select"}),
     )
     profile_picture = forms.ImageField(
         label=(
@@ -474,11 +478,6 @@ class BaseAddressEditForm(forms.Form):
 class EmployeeEditForm(BaseUserEditForm, BaseAddressEditForm):
     """Edit form for employee user + address + employee profile."""
 
-    gender = forms.ChoiceField(
-        label="Gender",
-        choices=GenderChoices.choices,
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
     role = forms.ChoiceField(
         label="Role",
         choices=Employee.RoleChoices.choices,
@@ -525,6 +524,7 @@ class EmployeeEditForm(BaseUserEditForm, BaseAddressEditForm):
             self.fields["email"].initial = self.user_instance.email
             self.fields["country_code"].initial = self.user_instance.country_code
             self.fields["phone"].initial = self.user_instance.phone
+            self.fields["gender"].initial = self.user_instance.gender
 
         if self.address_instance and not self.is_bound:
             self.fields["street1"].initial = self.address_instance.street1
@@ -535,7 +535,6 @@ class EmployeeEditForm(BaseUserEditForm, BaseAddressEditForm):
             self.fields["zip_code"].initial = self.address_instance.zip_code
 
         if self.employee_instance and not self.is_bound:
-            self.fields["gender"].initial = self.employee_instance.gender
             self.fields["role"].initial = self.employee_instance.role
             self.fields["department"].initial = self.employee_instance.department
             self.fields[
@@ -553,6 +552,7 @@ class EmployeeEditForm(BaseUserEditForm, BaseAddressEditForm):
         self.user_instance.email = self.cleaned_data["email"]
         self.user_instance.country_code = self.cleaned_data["country_code"]
         self.user_instance.phone = self.cleaned_data["phone"]
+        self.user_instance.gender = self.cleaned_data["gender"]
         if self.cleaned_data.get("profile_picture"):
             self.user_instance.profile_picture = self.cleaned_data["profile_picture"]
         self.user_instance.save()
@@ -565,7 +565,6 @@ class EmployeeEditForm(BaseUserEditForm, BaseAddressEditForm):
         else:
             Address.objects.create(user=self.user_instance, **address_data)
 
-        self.employee_instance.gender = self.cleaned_data["gender"]
         self.employee_instance.role = self.cleaned_data["role"]
         self.employee_instance.department = self.cleaned_data["department"]
         self.employee_instance.additional_info = self.cleaned_data[
@@ -628,11 +627,6 @@ class CandidateEditForm(BaseUserEditForm, BaseAddressEditForm):
         label="Date of Birth",
         widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
     )
-    gender = forms.ChoiceField(
-        label="Gender",
-        choices=GenderChoices.choices,
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
 
     def __init__(
         self,
@@ -658,6 +652,7 @@ class CandidateEditForm(BaseUserEditForm, BaseAddressEditForm):
             self.fields["email"].initial = self.user_instance.email
             self.fields["country_code"].initial = self.user_instance.country_code
             self.fields["phone"].initial = self.user_instance.phone
+            self.fields["gender"].initial = self.user_instance.gender
 
         if self.address_instance and not self.is_bound:
             self.fields["street1"].initial = self.address_instance.street1
@@ -682,7 +677,6 @@ class CandidateEditForm(BaseUserEditForm, BaseAddressEditForm):
             self.fields["father_name"].initial = self.candidate_instance.father_name
             self.fields["mother_name"].initial = self.candidate_instance.mother_name
             self.fields["dob"].initial = self.candidate_instance.dob
-            self.fields["gender"].initial = self.candidate_instance.gender
 
     def clean_dob(self):
         """Validate that date of birth is in the past."""
@@ -714,6 +708,7 @@ class CandidateEditForm(BaseUserEditForm, BaseAddressEditForm):
         self.user_instance.email = self.cleaned_data["email"]
         self.user_instance.country_code = self.cleaned_data["country_code"]
         self.user_instance.phone = self.cleaned_data["phone"]
+        self.user_instance.gender = self.cleaned_data["gender"]
         if self.cleaned_data.get("profile_picture"):
             self.user_instance.profile_picture = self.cleaned_data["profile_picture"]
         self.user_instance.save()
@@ -738,25 +733,25 @@ class CandidateEditForm(BaseUserEditForm, BaseAddressEditForm):
         self.candidate_instance.father_name = self.cleaned_data["father_name"].strip()
         self.candidate_instance.mother_name = self.cleaned_data["mother_name"].strip()
         self.candidate_instance.dob = self.cleaned_data["dob"]
-        self.candidate_instance.gender = self.cleaned_data["gender"]
         self.candidate_instance.save()
 
         return self.user_instance
 
 
-class BaseOtpVerificationForm(forms.Form):
-    """Shared OTP validation form for timestamp-based OTP fields."""
+# ========================================
+# OTP Related Forms
+# ========================================
 
-    OTP_EXPIRATION_MINUTES = 10
+
+# Base OTP Verification Form
+class BaseOtpVerificationForm(forms.Form):
+    """Shared OTP validation form for all OTP verification actions."""
+
+    otp_purpose = None
     otp_label = "OTP"
-    otp_field_name = ""
-    otp_timestamp_field_name = ""
     invalid_message = "Invalid OTP."
-    missing_message = "No OTP found. Please request a new OTP."
-    expired_message = "OTP has expired."
 
     otp = forms.CharField(
-        label="OTP",
         max_length=6,
         min_length=6,
         widget=forms.TextInput(
@@ -765,128 +760,296 @@ class BaseOtpVerificationForm(forms.Form):
     )
 
     def __init__(self, user, *args, **kwargs):
-        """Initialize form with user and set OTP field label."""
         super().__init__(*args, **kwargs)
         self.user = user
         self.fields["otp"].label = self.otp_label
 
     def clean_otp(self):
-        """Validate OTP against user's stored OTP and check expiration."""
-        otp = self.cleaned_data["otp"].strip()
-        expected_otp = getattr(self.user, self.otp_field_name, None)
-        created_at = getattr(self.user, self.otp_timestamp_field_name, None)
+        """Validate OTP using utility function."""
 
-        if not expected_otp:
-            raise forms.ValidationError(self.missing_message)
-        if not created_at:
-            raise forms.ValidationError(
-                "OTP timestamp missing. Please request a new OTP."
-            )
-        if otp != expected_otp:
+        otp = self.cleaned_data["otp"].strip()
+
+        if not otp.isdigit():
+            raise forms.ValidationError("OTP must contain only digits.")
+
+        if not check_otp(self.user, otp, self.otp_purpose):
             raise forms.ValidationError(self.invalid_message)
 
-        expires_at = created_at + timedelta(minutes=self.OTP_EXPIRATION_MINUTES)
-        if timezone.now() > expires_at:
-            raise forms.ValidationError(self.expired_message)
         return otp
 
 
-class EmailOtpVerificationForm(BaseOtpVerificationForm):
-    """Form for verifying email OTP."""
+# Email Verification
+class EmailVerifyOtpForm(BaseOtpVerificationForm):
+    """Verify user's email address."""
 
     otp_label = "Email OTP"
-    otp_field_name = "email_OTP"
-    otp_timestamp_field_name = "email_OTP_created_at"
-    invalid_message = "Invalid email OTP."
-    missing_message = "No email OTP found. Please request a new OTP."
-    expired_message = "Email OTP has expired."
+    otp_purpose = OTP.OTPPurpose.EMAIL_VERIFY
+
+    def save(self):
+        """Mark email as verified."""
+        self.user.email_verified = True
+        self.user.save(update_fields=["email_verified"])
 
 
-class PhoneOtpVerificationForm(BaseOtpVerificationForm):
-    """Form for verifying phone OTP."""
+# Phone Verification
+class PhoneVerifyOtpForm(BaseOtpVerificationForm):
+    """Verify user's phone number."""
 
     otp_label = "Phone OTP"
-    otp_field_name = "phone_OTP"
-    otp_timestamp_field_name = "phone_OTP_created_at"
-    invalid_message = "Invalid phone OTP."
-    missing_message = "No phone OTP found. Please request a new OTP."
-    expired_message = "Phone OTP has expired."
+    otp_purpose = OTP.OTPPurpose.PHONE_VERIFY
+
+    def save(self):
+        """Mark phone as verified."""
+        self.user.phone_verified = True
+        self.user.save(update_fields=["phone_verified"])
 
 
-class PasswordResetRequestForm(forms.Form):
-    """Form for requesting password reset OTP."""
+# Password Reset with OTP
+class PasswordResetOtpForm(BaseOtpVerificationForm):
+    """Verify OTP and reset password."""
 
-    email = forms.EmailField(
-        label="Email",
-        max_length=254,
-        widget=forms.EmailInput(
-            attrs={"class": "form-control", "placeholder": "email@example.com"}
-        ),
-    )
+    otp_label = "Password Reset OTP"
+    otp_purpose = OTP.OTPPurpose.PASSWORD_RESET
 
-    def clean_email(self):
-        """Validate that email exists in the system."""
-        email = self.cleaned_data["email"].strip().lower()
-        if not User.objects.filter(email__iexact=email).exists():
-            raise forms.ValidationError("No account found with this email.")
-        return email
-
-
-class SetNewPasswordForm(forms.Form):
-    """Form for validating OTP and setting a new password."""
-
-    OTP_EXPIRATION_MINUTES = 10
-
-    otp = forms.CharField(
-        label="OTP",
-        max_length=6,
-        min_length=6,
-        widget=forms.TextInput(
-            attrs={"class": "form-control", "placeholder": "Enter OTP"}
-        ),
-    )
     new_password1 = forms.CharField(
         label="New Password",
+        help_text="Enter a strong password.",
         widget=forms.PasswordInput(
-            attrs={"class": "form-control", "placeholder": "Enter new password"}
+            attrs={"class": "form-control", "placeholder": "New password"}
         ),
     )
     new_password2 = forms.CharField(
         label="Confirm New Password",
+        help_text="Re-enter the new password for confirmation.",
         widget=forms.PasswordInput(
             attrs={"class": "form-control", "placeholder": "Confirm new password"}
         ),
     )
 
-    def __init__(self, user, *args, **kwargs):
-        """Initialize form with user for OTP validation."""
-        super().__init__(*args, **kwargs)
-        self.user = user
-
     def clean(self):
-        """Validate OTP, check expiration, and ensure new passwords match."""
         cleaned_data = super().clean()
-        otp = (cleaned_data.get("otp") or "").strip()
+
         password1 = cleaned_data.get("new_password1")
         password2 = cleaned_data.get("new_password2")
 
         if password1 and password2 and password1 != password2:
             raise forms.ValidationError("Passwords do not match.")
 
-        if not self.user.password_otp:
-            raise forms.ValidationError("No password reset OTP found.")
-        if not self.user.password_otp_created_at:
-            raise forms.ValidationError("OTP timestamp missing. Request a new OTP.")
-        if otp != self.user.password_otp:
-            raise forms.ValidationError("Invalid OTP.")
-
-        expiration_time = self.user.password_otp_created_at + timedelta(
-            minutes=self.OTP_EXPIRATION_MINUTES
-        )
-        if timezone.now() > expiration_time:
-            raise forms.ValidationError("OTP has expired.")
-
         if password1:
             password_validation.validate_password(password1, self.user)
 
         return cleaned_data
+
+    def save(self):
+        """Update user password."""
+        password = self.cleaned_data["new_password1"]
+
+        self.user.set_password(password)
+        self.user.save(update_fields=["password"])
+
+
+# Email Change
+class EmailChangeOtpForm(BaseOtpVerificationForm):
+    """Verify OTP before changing email."""
+
+    otp_label = "Email Change OTP"
+    otp_purpose = OTP.OTPPurpose.EMAIL_CHANGE
+
+    new_email = forms.EmailField(
+        label="New Email Address",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={"class": "form-control", "placeholder": "New email"}
+        ),
+    )
+
+    def clean_new_email(self):
+        """Validate that new email is not already in use and normalize it."""
+        email = self.cleaned_data["new_email"].strip().lower()
+
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("This email is already in use.")
+
+        return email
+
+    def save(self):
+        """Update email and mark unverified."""
+
+        new_email = self.cleaned_data["new_email"]
+
+        self.user.email = new_email
+        self.user.email_verified = False
+
+        self.user.save(update_fields=["email", "email_verified"])
+
+
+# Phone Change
+class PhoneChangeOtpForm(BaseOtpVerificationForm):
+    """Verify OTP before changing phone number."""
+
+    otp_label = "Phone Change OTP"
+    otp_purpose = OTP.OTPPurpose.PHONE_CHANGE
+
+    new_country_code = forms.CharField(
+        label="New Country Code",
+        max_length=5,
+        validators=[country_code_validator],
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "+91"}),
+    )
+
+    new_phone = forms.CharField(
+        label="New Phone Number",
+        max_length=15,
+        validators=[phone_validator],
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "New phone number"}
+        ),
+    )
+
+    def clean(self):
+        """Validate new phone number and check for duplicates."""
+        cleaned_data = super().clean()
+
+        code = (cleaned_data.get("new_country_code") or "").strip()
+        phone = (cleaned_data.get("new_phone") or "").strip()
+
+        cleaned_data["new_country_code"] = code
+        cleaned_data["new_phone"] = phone
+
+        if (
+            User.objects.filter(country_code=code, phone=phone)
+            .exclude(pk=self.user.pk)
+            .exists()
+        ):
+            raise forms.ValidationError("This phone number is already in use.")
+
+        return cleaned_data
+
+    def save(self):
+        """Update phone and mark unverified."""
+
+        code = self.cleaned_data["new_country_code"]
+        phone = self.cleaned_data["new_phone"]
+
+        self.user.country_code = code
+        self.user.phone = phone
+        self.user.phone_verified = False
+
+        self.user.save(update_fields=["country_code", "phone", "phone_verified"])
+
+
+# Enable 2FA
+class Set2FAOtpForm(BaseOtpVerificationForm):
+    """Enable two-factor authentication."""
+
+    otp_label = "2FA Setup OTP"
+    otp_purpose = OTP.OTPPurpose.SET_2FA
+
+    # QR code generation is handled in the view, so we don't generate it here.
+    # def __init__(self, user, *args, **kwargs):
+    #     """Initialize form and generate QR code for authenticator app."""
+    #     super().__init__(user, *args, **kwargs)
+    #     self.image_label = "Scan the QR code below with your authenticator app:"
+    #     self.image_qr_path = generate_totp(self.user)
+
+    token = forms.CharField(
+        label="Authenticator Code",
+        max_length=6,
+        min_length=6,
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Enter 6-digit code"}
+        ),
+    )
+
+    def clean_token(self):
+        """Validate TOTP token using utility function."""
+        token = self.cleaned_data["token"].strip()
+
+        if not token.isdigit():
+            raise forms.ValidationError("Authenticator code must contain only digits.")
+        return token
+
+    def save(self):
+        """Enable TOTP using utility function."""
+        turn_on_totp(self.user, self.cleaned_data["token"].strip())
+
+
+# Disable 2FA
+class Remove2FAOtpForm(BaseOtpVerificationForm):
+    """Disable two-factor authentication. Email OTP is sent."""
+
+    otp_label = "2FA Removal OTP"
+    otp_purpose = OTP.OTPPurpose.REMOVE_2FA
+
+    def clean(self):
+        cleaned_data = super().clean()
+
+        if not self.user.is_2FA_enabled:
+            raise forms.ValidationError("Two-factor authentication is not enabled.")
+
+        return cleaned_data
+
+    def save(self):
+        """Disable TOTP using utility function."""
+
+        disable_totp(self.user)
+
+
+# Authenticator App Verification
+class TOTPVerificationForm(forms.Form):
+    """Verify authenticator app code."""
+
+    token = forms.CharField(
+        label="Authenticator Code",
+        max_length=6,
+        min_length=6,
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Enter 6-digit code"}
+        ),
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        """Initialize form with user for TOTP validation."""
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def clean_token(self):
+        """Validate TOTP token using utility function."""
+        token = self.cleaned_data["token"].strip()
+
+        if not token.isdigit():
+            raise forms.ValidationError("Authenticator code must contain only digits.")
+
+        if not validate_totp(self.user, token):
+            raise forms.ValidationError("Invalid authenticator code.")
+
+        return token
+
+
+# Request Password Reset OTP
+class PasswordResetRequestForm(forms.Form):
+    """Request password reset OTP."""
+
+    email = forms.EmailField(
+        label="Email Address",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={"class": "form-control", "placeholder": "Email address"}
+        ),
+    )
+
+    def clean_email(self):
+        """Validate that email exists and normalize it."""
+        email = self.cleaned_data["email"].strip().lower()
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise forms.ValidationError("No account found with this email.")
+
+        self.user = user
+        return email
+
+    def save(self):
+        """Send password reset OTP using utility function."""
+        send_email_otp(self.user, OTP.OTPPurpose.PASSWORD_RESET)

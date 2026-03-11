@@ -71,11 +71,25 @@ def send_sms_otp(user, purpose, message="Verification"):
 
 
 def check_otp(user, otp, purpose):
-    """Validate OTP for a specific purpose."""
+    """
+    Validate OTP for a specific purpose.
+
+    Rules:
+    - OTP must belong to the user
+    - OTP must match the purpose
+    - OTP must not be expired
+    - OTP must not be already used
+    """
+
     now = timezone.now()
 
     otp_record = (
-        OTP.objects.filter(user=user, purpose=purpose, expires_at__gt=now)
+        OTP.objects.filter(
+            user=user,
+            purpose=purpose,
+            is_used=False,
+            expires_at__gt=now,
+        )
         .order_by("-created_at")
         .first()
     )
@@ -84,7 +98,8 @@ def check_otp(user, otp, purpose):
         return False
 
     if check_password(otp, otp_record.otp):
-        otp_record.delete()
+        otp_record.is_used = True
+        otp_record.save(update_fields=["is_used"])
         return True
 
     return False

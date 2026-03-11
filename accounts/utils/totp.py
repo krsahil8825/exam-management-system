@@ -56,12 +56,6 @@ def generate_totp(user):
     return _generate_qr(user.email, secret)
 
 
-def turn_on_totp(user):
-    """Enable TOTP for the user."""
-    user.is_totp_enabled = True
-    user.save(update_fields=["is_totp_enabled"])
-
-
 def validate_totp(user, token):
     """
     Validate a TOTP token using the decrypted secret.
@@ -74,13 +68,32 @@ def validate_totp(user, token):
 
     totp = pyotp.TOTP(secret)
 
-    return totp.verify(token)
+    return totp.verify(token, valid_window=1)
+
+
+def turn_on_totp(user, token):
+    """Enable TOTP for the user."""
+
+    if not user.totp_secret:
+        raise ValueError("TOTP secret not found for user.")
+
+    if not validate_totp(user, token):
+        raise ValueError("Invalid TOTP token.")
+
+    user.is_2FA_enabled = True
+
+    user.save(update_fields=["is_2FA_enabled"])
 
 
 def disable_totp(user):
     """Disable TOTP and remove the secret."""
 
     user.totp_secret = None
-    user.is_totp_enabled = False
+    user.is_2FA_enabled = False
 
-    user.save(update_fields=["totp_secret", "is_totp_enabled"])
+    user.save(update_fields=["totp_secret", "is_2FA_enabled"])
+
+
+def is_2FA_enabled(user):
+    """Check if 2FA is enabled for the user."""
+    return user.is_2FA_enabled

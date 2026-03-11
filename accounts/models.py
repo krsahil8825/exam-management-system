@@ -205,6 +205,8 @@ class OTP(models.Model):
 
     otp = models.CharField(max_length=256)  # Store hashed OTP for security
 
+    is_used = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(default=otp_expiry_time)
 
@@ -226,7 +228,7 @@ class OTP(models.Model):
         - While saving, keep only latest LIMIT_RATE OTPs by deleting oldest.
         """
 
-        LIMIT_RATE = 5
+        LIMIT_RATE = 12
         RATE_LIMIT_WINDOW = timedelta(hours=1)
 
         if self.pk:
