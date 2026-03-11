@@ -25,4 +25,10 @@ if [ -d "_data" ]; then
 	find _data -type f -name "*.sqlite3" -print -delete
 fi
 
+echo "Deleting media files except .gitkeep"
+find media -type f ! -name ".gitkeep" -delete
+
+echo "Deleting folders inside media"
+find media -mindepth 1 -type d -empty -delete
+
 echo "Reset complete"
