@@ -34,7 +34,7 @@ class UserManager(BaseUserManager):
     @transaction.atomic
     def create_superuser(self, email, password=None, **extra_fields):
         """Create superuser and ensure an employee profile exists."""
-        from .models import Employee, GenderChoices
+        from .models import Employee
 
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
@@ -50,7 +50,6 @@ class UserManager(BaseUserManager):
         Employee.objects.get_or_create(
             user=user,
             defaults={
-                "gender": GenderChoices.MALE,
                 "role": Employee.RoleChoices.SUPER_ADMIN,
                 "department": Employee.DepartmentChoices.MANAGEMENT,
             },

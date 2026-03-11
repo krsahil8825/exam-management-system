@@ -7,15 +7,18 @@ Utility functions for generating and sending OTP codes.
 
 import secrets
 
+from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 
+from ..models import OTP
 
-def generate_otp():
+
+def _generate_otp():
     """Return a cryptographically strong 6-digit OTP string."""
     return "".join(secrets.choice("0123456789") for _ in range(6))
 
 
-def send_email_otp(user, otp, purpose="Verification"):
+def _send_email(user, otp, message="Verification"):
     """
     Send OTP to the user's email.
 
@@ -24,7 +27,7 @@ def send_email_otp(user, otp, purpose="Verification"):
     raise NotImplementedError("send_email_otp is not implemented yet.")
 
 
-def send_sms_otp(user, otp, purpose="Verification"):
+def _send_sms(user, otp, message="Verification"):
     """
     Send OTP to the user's phone via SMS.
 
@@ -33,31 +36,55 @@ def send_sms_otp(user, otp, purpose="Verification"):
     raise NotImplementedError("send_sms_otp is not implemented yet.")
 
 
-def send_email_verification_otp(user):
-    """Generate and store OTP for email verification, then send it."""
+def send_email_otp(user, purpose, message="Verification"):
+    """Generate and send an OTP to the user's email."""
 
-    otp = generate_otp()
-    user.email_OTP = otp
-    user.email_OTP_created_at = timezone.now()
-    user.save(update_fields=["email_OTP", "email_OTP_created_at"])
-    send_email_otp(user, otp, purpose="Email Verification")
+    if purpose not in OTP.OTPPurpose.values:
+        raise ValueError("Invalid OTP purpose specified.")
 
+    otp = _generate_otp()
 
-def send_phone_verification_otp(user):
-    """Generate and store OTP for phone verification, then send it."""
+    OTP.objects.create(
+        user=user,
+        purpose=purpose,
+        otp=make_password(otp),
+    )
 
-    otp = generate_otp()
-    user.phone_OTP = otp
-    user.phone_OTP_created_at = timezone.now()
-    user.save(update_fields=["phone_OTP", "phone_OTP_created_at"])
-    send_sms_otp(user, otp, purpose="Phone Verification")
+    _send_email(user, otp, message)
 
 
-def send_password_reset_otp(user):
-    """Generate and store OTP for password reset, then send it by email."""
+def send_sms_otp(user, purpose, message="Verification"):
+    """Generate and send an OTP to the user's phone."""
 
-    otp = generate_otp()
-    user.password_otp = otp
-    user.password_otp_created_at = timezone.now()
-    user.save(update_fields=["password_otp", "password_otp_created_at"])
-    send_email_otp(user, otp, purpose="Password Reset")
+    if purpose not in OTP.OTPPurpose.values:
+        raise ValueError("Invalid OTP purpose specified.")
+
+    otp = _generate_otp()
+
+    OTP.objects.create(
+        user=user,
+        purpose=purpose,
+        otp=make_password(otp),
+    )
+
+    _send_sms(user, otp, message)
+
+
+def check_otp(user, otp, purpose):
+    """Validate OTP for a specific purpose."""
+    now = timezone.now()
+
+    otp_record = (
+        OTP.objects.filter(user=user, purpose=purpose, expires_at__gt=now)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not otp_record:
+        return False
+
+    if check_password(otp, otp_record.otp):
+        otp_record.delete()
+        return True
+
+    return False

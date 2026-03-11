@@ -79,7 +79,7 @@ def validate_profile_photo(file):
         width, height = image.size
     except ValidationError:
         raise
-    except UnidentifiedImageError, OSError, ValueError:
+    except (UnidentifiedImageError, OSError, ValueError):
         raise ValidationError("Invalid or corrupted image file.")
     finally:
         file.seek(0)

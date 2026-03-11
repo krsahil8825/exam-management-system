@@ -205,31 +205,52 @@ class OTP(models.Model):
 
     otp = models.CharField(max_length=256)  # Store hashed OTP for security
 
-    created_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(default=otp_expiry_time)
 
     class Meta:
-        """Define unique constraints and indexes for efficient OTP management.
-
-        # Ensure each user has only one active OTP per purpose.
-        # A user may have multiple OTPs for different purposes, but
-        # duplicate OTP records for the same purpose are prevented.
-        # When a new OTP is requested for the same purpose, the
-        # existing record is updated instead of creating a new one.
-        """
-
-        constraints = [
-            models.UniqueConstraint(
-                fields=["user", "purpose"], name="unique_user_purpose_otp"
-            )
-        ]
+        """Define indexes for efficient OTP management."""
 
         indexes = [
-            models.Index(fields=["user", "purpose"]),
-            models.Index(fields=["expires_at"]),
-            models.Index(fields=["created_at"]),
-            models.Index(fields=["user"]),
+            models.Index(fields=["user", "purpose", "expires_at", "created_at"]),
         ]
+
+    def save(self, *args, **kwargs):
+        """
+        Save OTP with rate limiting and storage optimization.
+
+        Rules:
+        - Each (user, purpose) has its own rate limit.
+        - Maximum LIMIT_RATE OTPs allowed within RATE_LIMIT_WINDOW.
+        - If limit reached within window -> block new OTP.
+        - While saving, keep only latest LIMIT_RATE OTPs by deleting oldest.
+        """
+
+        LIMIT_RATE = 5
+        RATE_LIMIT_WINDOW = timedelta(hours=1)
+
+        if self.pk:
+            return super().save(*args, **kwargs)
+
+        now = timezone.now()
+
+        qs = OTP.objects.filter(user=self.user, purpose=self.purpose).order_by(
+            "-created_at"
+        )
+
+        recent_count = qs.filter(created_at__gte=now - RATE_LIMIT_WINDOW).count()
+
+        if recent_count >= LIMIT_RATE:
+            raise ValidationError("OTP request limit exceeded. Try again later.")
+
+        # Storage optimization
+        total_count = qs.count()
+
+        if total_count >= LIMIT_RATE:
+            oldest_to_delete = qs.last()
+            oldest_to_delete.delete()
+
+        super().save(*args, **kwargs)
 
 
 class Candidate(models.Model):
