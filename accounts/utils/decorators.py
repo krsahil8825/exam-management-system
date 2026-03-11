@@ -55,6 +55,20 @@ def fully_verified_required(view_func):
     return _wrapped_view
 
 
+def self_only_required(view_func):
+    """Require user to access only their own resources."""
+
+    @fully_verified_required
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        user_id = kwargs.get("user_id")
+        if user_id is not None and str(request.user.id) != str(user_id):
+            raise PermissionDenied("You can only access your own resources.")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped_view
+
+
 def employee_required(view_func):
     """Require fully verified user with an employee profile."""
 
