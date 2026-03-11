@@ -12,6 +12,8 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
+from django.utils import timezone
+from datetime import timedelta
 
 from .managers import UserManager
 from .utils.validate import (
@@ -19,14 +21,6 @@ from .utils.validate import (
     phone_validator,
     validate_profile_photo,
 )
-
-
-class GenderChoices(models.TextChoices):
-    """Standardized gender options for user profiles."""
-
-    MALE = "M", "Male"
-    FEMALE = "F", "Female"
-    OTHER = "O", "Other"
 
 
 def user_profile_picture_path(instance, filename):
@@ -45,8 +39,20 @@ def user_profile_picture_path(instance, filename):
         unique_prefix = uuid.uuid4().hex[:20]
 
 
+def otp_expiry_time():
+    """Return default OTP expiration time (10 minutes from now)."""
+    return timezone.now() + timedelta(minutes=10)
+
+
 class User(AbstractUser):
     """Custom authentication model using email as the username field."""
+
+    class GenderChoices(models.TextChoices):
+        """Standardized gender options for user profiles."""
+
+        MALE = "M", "Male"
+        FEMALE = "F", "Female"
+        OTHER = "O", "Other"
 
     objects = UserManager()
 
@@ -55,6 +61,9 @@ class User(AbstractUser):
     country_code = models.CharField(max_length=5, validators=[country_code_validator])
     phone = models.CharField(max_length=20, unique=True, validators=[phone_validator])
     email = models.EmailField(unique=True)
+    gender = models.CharField(
+        max_length=1, choices=GenderChoices.choices, blank=True, null=True
+    )
     profile_picture = models.ImageField(
         upload_to=user_profile_picture_path,
         blank=True,
@@ -62,17 +71,14 @@ class User(AbstractUser):
         validators=[validate_profile_photo],
     )
 
-    email_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
-    email_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
-    phone_OTP = models.CharField(max_length=6, blank=True, null=True, editable=False)
-    phone_OTP_created_at = models.DateTimeField(blank=True, null=True, editable=False)
-    password_otp = models.CharField(max_length=6, blank=True, null=True, editable=False)
-    password_otp_created_at = models.DateTimeField(
-        blank=True, null=True, editable=False
-    )
-
     email_verified = models.BooleanField(default=False)
     phone_verified = models.BooleanField(default=False)
+
+    # used for 2FA using TOTP (authenticator apps)
+    is_2FA_enabled = models.BooleanField(default=False)
+    totp_secret = models.CharField(
+        max_length=255, blank=True, null=True, editable=False
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["country_code", "phone", "first_name", "last_name"]
@@ -83,58 +89,60 @@ class User(AbstractUser):
         if self.email:
             self.email = self.email.strip().lower()
 
-        self.country_code = (self.country_code or "").strip()
-        self.phone = (self.phone or "").strip()
+        self.country_code = (self.country_code or "").strip().replace(" ", "")
+        self.phone = (self.phone or "").strip().replace(" ", "")
 
         if self.phone and not self.country_code:
             raise ValidationError("Country code is required when phone is provided.")
 
     def save(self, *args, **kwargs):
-        """Override save to handle email normalization, verification status resets, and superuser defaults."""
+        """
+        Override save to:
+        - Reset verification flags when email/phone changes
+        - Enforce required contact fields
+        - Automatically configure superusers
+        - Validate model data
+        - Remove old profile pictures when updated
+        """
+
         is_raw_save = kwargs.get("raw", False)
 
-        if not is_raw_save and self.pk and not self.is_superuser:
-            previous = (
-                type(self)
-                .objects.filter(pk=self.pk)
-                .values("email", "phone", "country_code")
-                .first()
-            )
-            if previous:
-                current_email = (self.email or "").strip().lower()
-                previous_email = (previous["email"] or "").strip().lower()
-                if current_email != previous_email:
-                    self.email_verified = False
+        old = self.__class__.objects.filter(pk=self.pk).first()
 
-                phone_changed = (self.phone or "") != (previous["phone"] or "")
-                country_code_changed = (self.country_code or "") != (
-                    previous["country_code"] or ""
+        # Reset verification flags
+        if old and not self.is_superuser:
+            new_email = (self.email or "").strip().lower()
+            old_email = (old.email or "").strip().lower()
+
+            if new_email != old_email:
+                self.email_verified = False
+
+            phone_changed = (self.phone or "") != (old.phone or "")
+            code_changed = (self.country_code or "") != (old.country_code or "")
+
+            if phone_changed or code_changed:
+                self.phone_verified = False
+
+            if not self.email or not self.phone or not self.country_code:
+                raise ValidationError(
+                    "Email, phone, and country code are required fields."
                 )
-                if phone_changed or country_code_changed:
-                    self.phone_verified = False
 
-                if not self.email or not self.phone or not self.country_code:
-                    raise ValidationError(
-                        "Email, phone, and country code are required fields."
-                    )
-
+        # Superuser defaults
         if self.is_superuser:
             self.is_staff = True
             self.email_verified = True
             self.phone_verified = True
 
+        # Model validation
         if not is_raw_save:
             self.full_clean()
 
-        if self.pk:
-            try:
-                old = User.objects.get(pk=self.pk)
-            except User.DoesNotExist:
-                old = None
-
-            if old and old.profile_picture and old.profile_picture != self.profile_picture:
-                if old.profile_picture.storage.exists(old.profile_picture.name):
-                    old.profile_picture.storage.delete(old.profile_picture.name)
+        # Delete old profile picture
+        if old and old.profile_picture and old.profile_picture != self.profile_picture:
+            storage = old.profile_picture.storage
+            if storage.exists(old.profile_picture.name):
+                storage.delete(old.profile_picture.name)
 
         return super().save(*args, **kwargs)
 
@@ -173,6 +181,57 @@ class Address(models.Model):
         return f"{self.user.email} - {self.city}"
 
 
+class OTP(models.Model):
+    """Model to store OTPs for various verification purposes."""
+
+    class OTPPurpose(models.TextChoices):
+        """Standardized OTP purposes for verification processes."""
+
+        EMAIL_VERIFY = "EMAIL_VERIFY", "Email Verification"
+        PHONE_VERIFY = "PHONE_VERIFY", "Phone Verification"
+        PASSWORD_RESET = "PASSWORD_RESET", "Password Reset"
+        EMAIL_CHANGE = "EMAIL_CHANGE", "Email Change"
+        PHONE_CHANGE = "PHONE_CHANGE", "Phone Change"
+        SET_2FA = "SET_2FA", "Set Two-Factor Authentication"
+        REMOVE_2FA = "REMOVE_2FA", "Remove Two-Factor Authentication"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="otps",
+    )
+
+    purpose = models.CharField(max_length=50, choices=OTPPurpose.choices)
+
+    otp = models.CharField(max_length=256)  # Store hashed OTP for security
+
+    created_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField(default=otp_expiry_time)
+
+    class Meta:
+        """Define unique constraints and indexes for efficient OTP management.
+
+        # Ensure each user has only one active OTP per purpose.
+        # A user may have multiple OTPs for different purposes, but
+        # duplicate OTP records for the same purpose are prevented.
+        # When a new OTP is requested for the same purpose, the
+        # existing record is updated instead of creating a new one.
+        """
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "purpose"], name="unique_user_purpose_otp"
+            )
+        ]
+
+        indexes = [
+            models.Index(fields=["user", "purpose"]),
+            models.Index(fields=["expires_at"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user"]),
+        ]
+
+
 class Candidate(models.Model):
     """Profile model for exam candidates."""
 
@@ -203,7 +262,6 @@ class Candidate(models.Model):
     father_name = models.CharField(max_length=255)
     mother_name = models.CharField(max_length=255)
     dob = models.DateField()
-    gender = models.CharField(max_length=1, choices=GenderChoices.choices)
 
     @classmethod
     def _next_candidate_id(cls):
@@ -261,7 +319,7 @@ class Employee(models.Model):
         related_name="employee_profile",
     )
     employee_id = models.CharField(max_length=50, unique=True, editable=False)
-    gender = models.CharField(max_length=1, choices=GenderChoices.choices)
+
     role = models.CharField(
         max_length=2,
         choices=RoleChoices.choices,
@@ -289,10 +347,7 @@ class Employee(models.Model):
             raise ValidationError("This user already has a Candidate profile.")
 
     def save(self, *args, **kwargs):
-        """Override save to generate a unique employee_id if not set, and set defaults for superusers."""
-        if self.user and self.user.is_superuser:
-            self.gender = GenderChoices.MALE
-            self.role = self.RoleChoices.SUPER_ADMIN
+        """Override save to generate a unique employee_id if not set."""
 
         if not self.employee_id:
             self.employee_id = self._next_employee_id()
