@@ -5,7 +5,7 @@ communication.models
 Defines models related to internal communication between employees.
 
 This module currently includes:
-- Message: Represents direct employee-to-employee communication.
+- Messages: Represents direct employee-to-employee communication.
 
 The design intentionally limits messaging to Employee profiles
 to maintain clear domain boundaries and internal communication control.
@@ -24,16 +24,24 @@ from accounts.models import Employee
 # Utility Function
 # =========================================================
 def message_attachment_path(instance, filename):
-    """Return the upload path for a message attachment."""
     sender_id = instance.sender.employee_id
     receiver_id = instance.receiver.employee_id
-    return f"message_attachments/{sender_id}_{receiver_id}/{filename}"
+
+    while True:
+        unique = uuid.uuid4().hex[:10]
+
+        newfilename = f"{unique}-{sender_id}-{receiver_id}-{filename}"
+
+        path = f"message_attachments/{sender_id}_{receiver_id}/{newfilename}".lower()
+
+        if not Messages.objects.filter(attachment=path).exists():
+            return path
 
 
 # =========================================================
 # Message Model
 # =========================================================
-class Message(models.Model):
+class Messages(models.Model):
     """Model representing a message between two employees."""
 
     sender = models.ForeignKey(
@@ -71,6 +79,13 @@ class Message(models.Model):
         """Model configuration."""
 
         ordering = ["-created_at"]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(sender=models.F("receiver")),
+                name="prevent_self_messaging",
+            )
+        ]
 
     def clean(self):
         """Ensure sender and receiver are not the same."""
