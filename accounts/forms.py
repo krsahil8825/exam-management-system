@@ -1,5 +1,5 @@
 """
-accounts.form
+accounts.forms
 ~~~~~~~~~~~~~
 
 Forms for user registration, login, profile editing, and OTP verification.

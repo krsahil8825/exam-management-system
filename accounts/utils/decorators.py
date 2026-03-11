@@ -17,8 +17,8 @@ from ..models import Employee
 def email_verified_required(view_func):
     """Require login and verified email."""
 
-    @wraps(view_func)
     @login_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if not request.user.email_verified:
             raise PermissionDenied("Email is not verified.")
@@ -30,8 +30,8 @@ def email_verified_required(view_func):
 def phone_verified_required(view_func):
     """Require login and verified phone."""
 
-    @wraps(view_func)
     @login_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if not request.user.phone_verified:
             raise PermissionDenied("Phone is not verified.")
@@ -43,8 +43,8 @@ def phone_verified_required(view_func):
 def fully_verified_required(view_func):
     """Require login with both email and phone verified."""
 
-    @wraps(view_func)
     @login_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if not request.user.email_verified:
             raise PermissionDenied("Email is not verified.")
@@ -58,8 +58,8 @@ def fully_verified_required(view_func):
 def employee_required(view_func):
     """Require fully verified user with an employee profile."""
 
-    @wraps(view_func)
     @fully_verified_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if not hasattr(request.user, "employee_profile"):
             raise PermissionDenied("Employee access required.")
@@ -71,8 +71,8 @@ def employee_required(view_func):
 def candidate_required(view_func):
     """Require fully verified user with a candidate profile."""
 
-    @wraps(view_func)
     @fully_verified_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if not hasattr(request.user, "candidate_profile"):
             raise PermissionDenied("Candidate access required.")
@@ -84,8 +84,8 @@ def candidate_required(view_func):
 def admin_required(view_func):
     """Require employee role to be SUPER_ADMIN or ADMIN."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         role = request.user.employee_profile.role
         allowed = {Employee.RoleChoices.SUPER_ADMIN, Employee.RoleChoices.ADMIN}
@@ -99,8 +99,8 @@ def admin_required(view_func):
 def super_admin_required(view_func):
     """Require employee role to be SUPER_ADMIN."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if request.user.employee_profile.role != Employee.RoleChoices.SUPER_ADMIN:
             raise PermissionDenied("Super admin privileges required.")
@@ -112,8 +112,8 @@ def super_admin_required(view_func):
 def manager_required(view_func):
     """Require employee role to be MANAGER."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if request.user.employee_profile.role != Employee.RoleChoices.MANAGER:
             raise PermissionDenied("Manager access required.")
@@ -125,8 +125,8 @@ def manager_required(view_func):
 def examiner_required(view_func):
     """Require employee role to be EXAMINER."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if request.user.employee_profile.role != Employee.RoleChoices.EXAMINER:
             raise PermissionDenied("Examiner access required.")
@@ -138,8 +138,8 @@ def examiner_required(view_func):
 def invigilator_required(view_func):
     """Require employee role to be INVIGILATOR."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if request.user.employee_profile.role != Employee.RoleChoices.INVIGILATOR:
             raise PermissionDenied("Invigilator access required.")
@@ -151,8 +151,8 @@ def invigilator_required(view_func):
 def assistant_required(view_func):
     """Require employee role to be ASSISTANT."""
 
-    @wraps(view_func)
     @employee_required
+    @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
         if request.user.employee_profile.role != Employee.RoleChoices.ASSISTANT:
             raise PermissionDenied("Assistant access required.")
